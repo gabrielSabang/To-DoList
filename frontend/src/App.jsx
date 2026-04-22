@@ -3,9 +3,9 @@ import { useState, useRef, useEffect } from 'react'
 const FILTERS = ['All', 'Active', 'Completed']
 
 const SAMPLE_TODOS = [
-  { id: 1, text: 'Buy groceries 🛒', completed: false, createdAt: Date.now() - 3000 },
+  { id: 1, text: 'Buy groceries', completed: false, createdAt: Date.now() - 3000 },
   { id: 2, text: 'Finish project report', completed: true, createdAt: Date.now() - 2000 },
-  { id: 3, text: 'Call mom 📞', completed: false, createdAt: Date.now() - 1000 },
+  { id: 3, text: 'Call mom', completed: false, createdAt: Date.now() - 1000 },
 ]
 
 export default function App() {

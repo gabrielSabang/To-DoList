@@ -1,22 +1,45 @@
 import { useState, useRef, useEffect } from 'react'
 
-const FILTERS = ['All', 'Active', 'Completed']
+const FILTERS = ['All', 'Active', 'Completed'] 
 
-const SAMPLE_TODOS = [
-  { id: 1, text: 'Buy groceries', completed: false, createdAt: Date.now() - 3000 },
-  { id: 2, text: 'Finish project report', completed: true, createdAt: Date.now() - 2000 },
-  { id: 3, text: 'Call mom', completed: false, createdAt: Date.now() - 1000 },
-]
 
 export default function App() {
-  const [todos, setTodos] = useState(SAMPLE_TODOS)
+  const [todos, setTodos] = useState([])
   const [input, setInput] = useState('')
   const [filter, setFilter] = useState('All')
   const [editingId, setEditingId] = useState(null)
   const [editText, setEditText] = useState('')
   const [theme, setTheme] = useState('light')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
   const inputRef = useRef(null)
   const editRef = useRef(null)
+
+  const API_BASE = '/api/cards'
+
+  useEffect(() => {
+    const fetchTodos = async () => {
+      setError(null)
+      try {
+        const res = await fetch(`${API_BASE}/cardList`)
+        if (!res.ok) throw new Error(`Failed to load tasks: ${res.status}`)
+        const data = await res.json()
+        setTodos(data.map(card => ({
+          id: card._id,
+          text: card.text,
+          completed: card.completed ?? false,
+          createdAt: card.createdAt ? new Date(card.createdAt).getTime() : Date.now()
+        })))
+      } catch (err) {
+        console.error(err)
+        setError('Unable to load tasks from the backend.')
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchTodos()
+  }, [])
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
@@ -28,20 +51,79 @@ export default function App() {
     }
   }, [editingId])
 
-  const addTodo = () => {
+  const handleApiError = (message, err) => {
+    console.error(message, err)
+    setError(message)
+  }
+
+  const createTodoOnServer = async (text) => {
+    const res = await fetch(`${API_BASE}/createCard`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text })
+    })
+    if (!res.ok) throw new Error(`Create failed: ${res.status}`)
+    return res.json()
+  }
+
+  const updateTodoOnServer = async (id, changes) => {
+    const res = await fetch(`${API_BASE}/updateCard/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(changes)
+    })
+    if (!res.ok) throw new Error(`Update failed: ${res.status}`)
+    const result = await res.json()
+    return result.card
+  }
+
+  const deleteTodoOnServer = async (id) => {
+    const res = await fetch(`${API_BASE}/delCard/${id}`, { method: 'DELETE' })
+    if (!res.ok) throw new Error(`Delete failed: ${res.status}`)
+  }
+
+  const addTodo = async () => {
     const trimmed = input.trim()
     if (!trimmed) return
-    setTodos(prev => [...prev, { id: Date.now(), text: trimmed, completed: false, createdAt: Date.now() }])
+
     setInput('')
     inputRef.current?.focus()
+
+    try {
+      const newCard = await createTodoOnServer(trimmed)
+      setTodos(prev => [
+        ...prev,
+        {
+          id: newCard._id,
+          text: newCard.text,
+          completed: newCard.completed ?? false,
+          createdAt: newCard.createdAt ? new Date(newCard.createdAt).getTime() : Date.now()
+        }
+      ])
+    } catch (err) {
+      handleApiError('Unable to add task.', err)
+    }
   }
 
-  const toggleTodo = (id) => {
-    setTodos(prev => prev.map(t => t.id === id ? { ...t, completed: !t.completed } : t))
+  const toggleTodo = async (id) => {
+    const todo = todos.find(t => t.id === id)
+    if (!todo) return
+
+    try {
+      const updated = await updateTodoOnServer(id, { completed: !todo.completed })
+      setTodos(prev => prev.map(t => t.id === id ? { ...t, completed: updated.completed ?? !t.completed } : t))
+    } catch (err) {
+      handleApiError('Unable to update task status.', err)
+    }
   }
 
-  const deleteTodo = (id) => {
-    setTodos(prev => prev.filter(t => t.id !== id))
+  const deleteTodo = async (id) => {
+    try {
+      await deleteTodoOnServer(id)
+      setTodos(prev => prev.filter(t => t.id !== id))
+    } catch (err) {
+      handleApiError('Unable to delete task.', err)
+    }
   }
 
   const startEdit = (todo) => {
@@ -49,12 +131,18 @@ export default function App() {
     setEditText(todo.text)
   }
 
-  const saveEdit = () => {
+  const saveEdit = async () => {
     const trimmed = editText.trim()
     if (!trimmed) return
-    setTodos(prev => prev.map(t => t.id === editingId ? { ...t, text: trimmed } : t))
-    setEditingId(null)
-    setEditText('')
+
+    try {
+      const updated = await updateTodoOnServer(editingId, { text: trimmed })
+      setTodos(prev => prev.map(t => t.id === editingId ? { ...t, text: updated.text } : t))
+      setEditingId(null)
+      setEditText('')
+    } catch (err) {
+      handleApiError('Unable to save task edit.', err)
+    }
   }
 
   const cancelEdit = () => {
@@ -62,13 +150,26 @@ export default function App() {
     setEditText('')
   }
 
-  const clearCompleted = () => {
-    setTodos(prev => prev.filter(t => !t.completed))
+  const clearCompleted = async () => {
+    const completedTasks = todos.filter(t => t.completed)
+    if (completedTasks.length === 0) return
+
+    try {
+      await Promise.all(completedTasks.map(task => deleteTodoOnServer(task.id)))
+      setTodos(prev => prev.filter(t => !t.completed))
+    } catch (err) {
+      handleApiError('Unable to clear completed tasks.', err)
+    }
   }
 
-  const toggleAll = () => {
+  const toggleAll = async () => {
     const allDone = todos.every(t => t.completed)
-    setTodos(prev => prev.map(t => ({ ...t, completed: !allDone })))
+    try {
+      await Promise.all(todos.map(t => updateTodoOnServer(t.id, { completed: !allDone })))
+      setTodos(prev => prev.map(t => ({ ...t, completed: !allDone })))
+    } catch (err) {
+      handleApiError('Unable to update all tasks.', err)
+    }
   }
 
   const filtered = todos.filter(t => {
@@ -79,6 +180,14 @@ export default function App() {
 
   const activeCount = todos.filter(t => !t.completed).length
   const completedCount = todos.filter(t => t.completed).length
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-base-200 flex items-center justify-center">
+        <div className="text-center text-lg font-medium">Loading tasks...</div>
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-base-200 flex flex-col items-center py-12 px-4 transition-colors duration-300">
@@ -122,6 +231,12 @@ export default function App() {
           </div>
         )}
       </div>
+
+      {error && (
+        <div className="alert alert-error shadow-lg w-full max-w-lg mb-4">
+          <div>{error}</div>
+        </div>
+      )}
 
       {/* Input card */}
       <div className="card bg-base-100 shadow-xl w-full max-w-lg mb-4">

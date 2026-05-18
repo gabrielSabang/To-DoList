@@ -19,9 +19,9 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use("/api/cards/", todoRoutes); 
+app.use("/api/cards", todoRoutes)
 
-mongoose.connect(`${process.env.db_url}`)
+mongoose.connect(process.env.db_url)
     .then(() => {
         console.log("DB connected");
         

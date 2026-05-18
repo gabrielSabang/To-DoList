@@ -29,12 +29,10 @@ export function useTodos() {
     loadTodos()
   }, [])
 
-  // Apply theme
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
   }, [theme])
 
-  // Focus on edit input
   useEffect(() => {
     if (editingId !== null && editRef.current) {
       editRef.current.focus()
